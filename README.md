@@ -35,6 +35,12 @@ Run the local JVM unit and Robolectric tests (including `MockWebServer` verifica
 gradle :app:testDebugUnitTest
 ```
 
+## GitHub Actions APK Build
+
+The `Build Android APK` workflow builds and uploads a debug APK signed with the
+standard Android debug keystore when changes are pushed to `main` or `master`, or
+when manually dispatched. No repository signing secrets are required.
+
 ## Security Notes
 
 - Session values, OAuth authorization codes, Google credentials, student PII, and raw HTML bodies are never logged or shown in the UI.
