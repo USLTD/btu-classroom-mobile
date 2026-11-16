@@ -1,0 +1,140 @@
+<resources>
+    <string name="app_name">BTUCM</string>
+    <string name="app_full_name">BTU Classroom Mobile</string>
+    <string name="unofficial_badge">არაოფიციალური სტუდენტური კლიენტი</string>
+    <string name="target_host_label">classroom.btu.edu.ge</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">მთავარი</string>
+    <string name="nav_courses">კურსები</string>
+    <string name="nav_schedule">ცხრილი</string>
+    <string name="nav_more">მეტი</string>
+    <string name="nav_back">უკან</string>
+
+    <!-- Onboarding & Authentication -->
+    <string name="onboarding_title">BTU Classroom — მშობლიური და ოფლაინ</string>
+    <string name="onboarding_subtitle">სწრაფი მობილური წვდომა არჩეულ კურსებზე, კრედიტებსა და ქულებზე ბრაუზერის გარეშე.</string>
+    <string name="onboarding_disclaimer">აპლიკაცია არაოფიციალურია და არ არის აფილირებული ბიზნესისა და ტექნოლოგიების უნივერსიტეტთან (BTU). უკავშირდება პირდაპირ ოფიციალურ პორტალს.</string>
+    <string name="onboarding_privacy_title">ლოკალური კონფიდენციალურობა</string>
+    <string name="onboarding_privacy_body">თქვენი სესია და აკადემიური მონაცემები დაშიფრულად ინახება მხოლოდ ამ მოწყობილობაზე — სერვერებისა და ანალიტიკის გარეშე.</string>
+    <string name="remember_login_title">სესიის დამახსოვრება მოწყობილობაზე</string>
+    <string name="remember_login_subtitle_on">სესია ინახება Android Keystore-ით დაშიფრულად</string>
+    <string name="remember_login_subtitle_off">მხოლოდ მიმდინარე სესია: იშლება აპლიკაციის დახურვისას</string>
+    <string name="action_sign_in">შესვლა BTU Classroom-ით</string>
+    <string name="action_open_external_browser">გახსნა გარე ბრაუზერში</string>
+    <string name="action_resume_browser">ბრაუზერში დაბრუნება</string>
+    <string name="auth_restoring_session">შენახული სესიის აღდგენა და შემოწმება…</string>
+    <string name="auth_verifying_session">BTU სესიის შემოწმება HTTPS-ით…</string>
+    <string name="auth_external_browser_hint">თუ Google ჩაშენებულ ბრაუზერს დაბლოკავს, შეგიძლიათ ოფიციალური პორტალი გარე ბრაუზერში გახსნათ.</string>
+
+    <!-- Browser Modal -->
+    <string name="browser_modal_title">BTU Classroom — ავტორიზაცია</string>
+    <string name="action_close_browser">ბრაუზერის დახურვა</string>
+    <string name="browser_initializing">GeckoView სესიის ინიციალიზაცია…</string>
+
+    <!-- Freshness & Status -->
+    <string name="freshness_updated_just_now">განახლდა ახლახან</string>
+    <string name="freshness_updated_minutes">განახლდა %1$d წთ წინ</string>
+    <string name="freshness_updated_hours">განახლდა %1$d სთ წინ</string>
+    <string name="freshness_updated_days">განახლდა %1$d დღის წინ</string>
+    <string name="freshness_offline_cached">ოფლაინ — ნაჩვენებია შენახული მონაცემები</string>
+    <string name="freshness_never_synced">ჯერ არ სინქრონიზებულა</string>
+    <string name="status_syncing">სინქრონიზაცია…</string>
+    <string name="action_refresh">განახლება</string>
+    <string name="action_retry">თავიდან ცდა</string>
+
+    <!-- Home Dashboard -->
+    <string name="home_greeting_default">სტუდენტის დაფა</string>
+    <string name="home_courses_summary_title">არჩეული კურსები</string>
+    <string name="home_enrolled_count">%1$d კურსი</string>
+    <string name="home_total_credits">%1$s კრედიტი</string>
+    <string name="home_graded_count">%1$d შეფასებული</string>
+    <string name="home_average_score">საშ. ქულა (შეფასებული): %1$s</string>
+    <string name="home_view_all_courses">ყველა კურსის ნახვა</string>
+    <string name="home_recent_courses_title">აქტიური კურსების მიმოხილვა</string>
+    <string name="home_no_courses_yet">კურსები ჯერ არ სინქრონიზებულა. ჩამოწიეთ ან დააჭირეთ განახლებას BTU Classroom-დან ჩამოსატვირთად.</string>
+    <string name="home_schedule_preview_title">კვირის ცხრილი (ფაზა 3)</string>
+    <string name="home_schedule_preview_body">ცხრილისა და გამოცდების პარსერები ჩაირთვება შესაბამისი HTML სტრუქტურის შემოწმების შემდეგ.</string>
+
+    <!-- Courses & Details -->
+    <string name="courses_title">არჩეული კურსები</string>
+    <string name="courses_filter_all">ყველა სემესტრი</string>
+    <string name="courses_empty_title">კურსები ვერ მოიძებნა</string>
+    <string name="courses_empty_body">BTU Classroom-მა დააბრუნა აქტიური ცხრილი ჩანაწერების გარეშე.</string>
+    <string name="courses_unavailable_title">კურსები დროებით მიუწვდომელია</string>
+    <string name="courses_unavailable_body">BTU Classroom მიუთითებს, რომ ეს მოდული დროებით შეზღუდულია ან მიმდინარეობს ტექნიკური სამუშაოები.</string>
+    <string name="courses_unsupported_title">გვერდის სტრუქტურა შეიცვალა</string>
+    <string name="courses_unsupported_body">BTUCM-მა ვერ ამოიცნო კურსების გვერდის მოსალოდნელი HTML სტრუქტურა. შენახული კურსები უცვლელია.</string>
+    <string name="course_credits_label">%1$s კრ.</string>
+    <string name="course_min_credit_label">მინ. %1$s</string>
+    <string name="course_score_ungraded">შეუფასებელი (—)</string>
+    <string name="course_score_value">%1$s ქულა</string>
+    <string name="course_detail_title">კურსის დეტალები</string>
+    <string name="course_detail_overview">ზოგადი ინფორმაცია</string>
+    <string name="course_detail_code">კოდი</string>
+    <string name="course_detail_semester">სემესტრი</string>
+    <string name="course_detail_lecturer">ლექტორი</string>
+    <string name="course_detail_credits">კრედიტები</string>
+    <string name="course_detail_score">ჯამური ქულა</string>
+    <string name="course_detail_grades_title">შეფასების კომპონენტები</string>
+    <string name="course_detail_resources_title">კურსის მასალები</string>
+    <string name="course_detail_unavailable">კურსის დეტალური გვერდის სტრუქტურა დროებით მიუწვდომელია ან შეცვლილია. ნაჩვენებია ძირითადი მონაცემები.</string>
+    <string name="course_detail_offline_notice">ნაჩვენებია კურსის შენახული დეტალები.</string>
+
+    <!-- Schedule Placeholder -->
+    <string name="schedule_title">ცხრილი და გამოცდები</string>
+    <string name="schedule_placeholder_title">ელოდება პორტალის სტრუქტურის შემოწმებას</string>
+    <string name="schedule_placeholder_body">კვირის ცხრილისა (/ge/student/me/schedule) და გამოცდების (/ge/exams/list) მოდულები დაგეგმილია მე-3 ფაზაში. BTUCM არასოდეს აჩვენებს გამოგონილ დროს ან თარიღებს.</string>
+    <string name="schedule_placeholder_action">პორტალის ცხრილის გახსნა ბრაუზერში</string>
+
+    <!-- More & Settings -->
+    <string name="more_title">მეტი</string>
+    <string name="settings_title">პარამეტრები</string>
+    <string name="section_preferences">პარამეტრები</string>
+    <string name="section_session_security">სესია და მეხსიერება</string>
+    <string name="section_about">BTUCM-ის შესახებ</string>
+    <string name="setting_language">ენა</string>
+    <string name="language_system">სისტემური</string>
+    <string name="language_english">English</string>
+    <string name="language_georgian">ქართული</string>
+    <string name="setting_theme">თემა</string>
+    <string name="theme_system">სისტემური</string>
+    <string name="theme_light">ნათელი</string>
+    <string name="theme_dark">მუქი</string>
+    <string name="setting_dynamic_color">დინამიური ფერები (Material You)</string>
+    <string name="setting_dynamic_color_desc">ფერების მორგება ფონურ სურათზე Android 12+-ზე</string>
+    <string name="setting_session_mode">სესიის შენახვა</string>
+    <string name="session_mode_memory">მხოლოდ მეხსიერებაში</string>
+    <string name="session_mode_remember">დამახსოვრება (დაშიფრული)</string>
+    <string name="action_sign_out">გასვლა</string>
+    <string name="action_clear_local_data">ლოკალური მონაცემების წაშლა</string>
+    <string name="about_version">BTUCM 0.1 Alpha (v%1$s)</string>
+    <string name="about_disclaimer">არაოფიციალური სტუდენტური კლიენტი BTU Classroom-ისთვის. არ არის აფილირებული ბიზნესისა და ტექნოლოგიების უნივერსიტეტთან.</string>
+
+    <!-- Account Dialogs -->
+    <string name="logout_dialog_title">გსურთ BTU Classroom-დან გასვლა?</string>
+    <string name="logout_dialog_message">გაიგზავნება მოთხოვნა /ge/login/logout მისამართზე, წაიშლება ლოკალური სესია და გასუფთავდება მოწყობილობაზე შენახული აკადემიური მონაცემები.</string>
+    <string name="logout_dialog_confirm">გასვლა</string>
+    <string name="clear_data_dialog_title">წავშალოთ ყველა ლოკალური მონაცემი?</string>
+    <string name="clear_data_dialog_message">წაშლის შენახულ კურსებს, ქულებსა და სესიას მოწყობილობიდან BTU Classroom-ზე გასვლის მოთხოვნის გაგზავნის გარეშე.</string>
+    <string name="clear_data_dialog_confirm">წაშლა</string>
+    <string name="dialog_cancel">გაუქმება</string>
+    <string name="remote_logout_unconfirmed">ლოკალური მონაცემები წაიშალა, თუმცა სერვერზე გასვლის დადასტურება ქსელის შეცდომის გამო ვერ მოხერხდა.</string>
+
+    <!-- Re-auth Prompt -->
+    <string name="reauth_dialog_title">სესიას ვადა გაუვიდა</string>
+    <string name="reauth_dialog_message">თქვენი BTU Classroom სესია სერვერზე აღარ არის აქტიური. შენახული კურსები ხელმისაწვდომია ოფლაინში, ან შეგიძლიათ თავიდან შეხვიდეთ სინქრონიზაციისთვის.</string>
+    <string name="reauth_dialog_confirm">თავიდან შესვლა</string>
+    <string name="reauth_dialog_dismiss">ოფლაინ რეჟიმი</string>
+
+    <!-- Debug-only Diagnostics -->
+    <string name="diagnostics_title">დეველოპერის დიაგნოსტიკა</string>
+    <string name="diagnostics_subtitle">მხოლოდ Debug რეჟიმი: პარსერების სტატუსი და ტელემეტრია</string>
+    <string name="diagnostics_compat_title">მოდულების თავსებადობის რეესტრი</string>
+    <string name="diagnostics_auth_title">ავტორიზაციის და გაფართოების სტატუსი</string>
+    <string name="diagnostics_log_title">უსაფრთხო მოვლენების ჟურნალი</string>
+    <string name="action_verify_session">სესიის შემოწმება</string>
+    <string name="action_check_expiry">ვადის შემოწმება</string>
+    <string name="action_clear_log">გასუფთავება</string>
+    <string name="empty_log_message">მიმდინარე სესიაში დიაგნოსტიკური ჩანაწერები არ არის.</string>
+</resources>

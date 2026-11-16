@@ -1,13 +1,8 @@
 package com.example
 
-import com.example.data.BtuSessionRepository
-import com.example.gecko.GeckoExtensionMessageHandler
-import com.example.model.CookieMetadata
-import com.example.model.SessionExpiryStatus
-import org.json.JSONArray
+import com.example.core.auth.GeckoExtensionMessageHandler
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,157 +15,73 @@ import org.robolectric.annotation.Config
 class GeckoExtensionMessageHandlerTest {
 
   @Test
-  fun `dispatches OAuth token capture, session expiration, UA update, and cookie metadata safely`() {
-    val repository = BtuSessionRepository()
+  fun `dispatches hardened session lifecycle events cleanly`() {
+    var detectedSession: String? = null
+    var readySession: String? = null
+    var missingCalled = false
     var expiredReason: String? = null
-    var listedDomain: String? = null
-    var listedCookies: List<CookieMetadata> = emptyList()
-    var deletedCount = 0
-    var debugLoggedCount = 0
+    var callbackObserved = false
+    var authenticatedPageReached = false
 
     val handler = GeckoExtensionMessageHandler(
       object : GeckoExtensionMessageHandler.Listener {
         override fun onSessionDetected(sessionValue: String?, expirationDateEpochSeconds: Long?) {
-          repository.onAnonymousSessionDetected(sessionValue, expirationDateEpochSeconds)
+          detectedSession = sessionValue
         }
 
         override fun onSessionReady(sessionValue: String, expirationDateEpochSeconds: Long?) {
-          repository.onSessionReady(sessionValue, expirationDateEpochSeconds)
+          readySession = sessionValue
         }
 
         override fun onSessionCookieMissing() {
-          repository.onSessionCookieMissing()
+          missingCalled = true
         }
 
         override fun onSessionExpired(reason: String, expirationDateEpochSeconds: Long?) {
           expiredReason = reason
         }
 
-        override fun onBtuCallbackObserved() = Unit
-        override fun onAuthenticatedPageReached() = Unit
-
-        override fun onOAuthTokenCaptured(
-          hasAuthorizationCode: Boolean,
-          hasAccessToken: Boolean,
-          tokenPayload: String?,
-          oauthError: String?,
-        ) {
-          repository.onOAuthTokenCaptured(hasAuthorizationCode, hasAccessToken, tokenPayload, oauthError)
+        override fun onBtuCallbackObserved(hasError: Boolean) {
+          callbackObserved = true
         }
 
-        override fun onUserAgentUpdated(modeId: String, hasOverride: Boolean) {
-          repository.onUserAgentApplied(modeId, hasOverride)
-        }
-
-        override fun onDomainCookiesListed(
-          domain: String,
-          cookies: List<CookieMetadata>,
-          rejected: Boolean,
-          errorOrReason: String?,
-        ) {
-          listedDomain = domain
-          listedCookies = cookies
-          repository.onDomainCookiesListed(cookies)
-        }
-
-        override fun onDomainCookiesDeleted(
-          domain: String,
-          deletedCount: Int,
-          deletedNames: List<String>,
-          rejected: Boolean,
-          errorOrReason: String?,
-        ) {
-          listedDomain = domain
-          // Use local var outside via closure
-          this@GeckoExtensionMessageHandlerTest.let {
-            // handled via outer variable below
-          }
-          if (!rejected && errorOrReason == null) {
-            repository.onDomainCookiesListed(emptyList())
-          }
-        }
-
-        override fun onBtuCookiesDebugLogged(domain: String, cookies: List<CookieMetadata>, error: String?) {
-          debugLoggedCount = cookies.size
+        override fun onAuthenticatedPageReached() {
+          authenticatedPageReached = true
         }
       },
     )
 
-    // 1. OAuth token capture payload
     handler.dispatchIncomingJson(
       JSONObject()
-        .put("type", "OAUTH_TOKEN_CAPTURED")
-        .put("hasAuthorizationCode", true)
-        .put("hasAccessToken", false)
-        .put("tokenPayload", "secret_auth_code_999"),
+        .put("type", "SESSION_DETECTED")
+        .put("session", "anon_cookie_1"),
     )
-    assertTrue(repository.state.value.oauthTokenCaptured)
-    assertFalse(repository.state.value.logs.any { it.message.contains("secret_auth_code_999") })
+    assertEquals("anon_cookie_1", detectedSession)
 
-    // 2. Session ready
+    handler.dispatchIncomingJson(
+      JSONObject()
+        .put("type", "BTU_CALLBACK_OBSERVED")
+        .put("hasError", false),
+    )
+    assertTrue(callbackObserved)
+
+    handler.dispatchIncomingJson(JSONObject().put("type", "AUTHENTICATED_PAGE_REACHED"))
+    assertTrue(authenticatedPageReached)
+
     handler.dispatchIncomingJson(
       JSONObject()
         .put("type", "SESSION_READY")
-        .put("session", "btu_session_secret_xyz")
-        .put("expirationDate", 1800000000L),
+        .put("session", "auth_cookie_99"),
     )
-    assertTrue(repository.state.value.sessionCaptured)
-    assertEquals(SessionExpiryStatus.ACTIVE, repository.state.value.sessionExpiryStatus)
-    assertEquals("btu_session_secret_xyz", repository.currentSessionValue())
-
-    // 3. UA update
-    handler.dispatchIncomingJson(
-      JSONObject()
-        .put("type", "USER_AGENT_UPDATED")
-        .put("modeId", "FIREFOX_MOBILE")
-        .put("hasOverride", true),
-    )
-    assertEquals("Firefox Android", repository.state.value.appliedUserAgentLabel)
-
-    // 4. Domain cookie listing & BTU debug logging
-    val cookiesArray = JSONArray().put(
-      JSONObject()
-        .put("name", "argus_session")
-        .put("domain", "classroom.btu.edu.ge")
-        .put("path", "/")
-        .put("secure", true)
-        .put("httpOnly", true)
-        .put("sameSite", "lax")
-        .put("isSessionCookie", false)
-        .put("expirationDate", 1800000000L)
-        .put("isExpired", false),
-    )
-    handler.dispatchIncomingJson(
-      JSONObject()
-        .put("type", "DOMAIN_COOKIES_LIST")
-        .put("domain", "classroom.btu.edu.ge")
-        .put("rejected", false)
-        .put("cookies", cookiesArray),
-    )
-    assertEquals("classroom.btu.edu.ge", listedDomain)
-    assertEquals(1, listedCookies.size)
-    assertEquals("argus_session", listedCookies[0].name)
+    assertEquals("auth_cookie_99", readySession)
 
     handler.dispatchIncomingJson(
       JSONObject()
-        .put("type", "BTU_COOKIES_DEBUG_LOG")
-        .put("domain", "classroom.btu.edu.ge")
-        .put("cookies", cookiesArray),
+        .put("type", "SESSION_READY")
+        .put("session", ""),
     )
-    assertEquals(1, debugLoggedCount)
+    assertTrue(missingCalled)
 
-    // 5. Domain cookie deletion
-    handler.dispatchIncomingJson(
-      JSONObject()
-        .put("type", "DOMAIN_COOKIES_DELETED")
-        .put("domain", "classroom.btu.edu.ge")
-        .put("rejected", false)
-        .put("deletedCount", 1)
-        .put("deletedNames", JSONArray().put("argus_session")),
-    )
-    assertTrue(repository.state.value.inspectedCookies.isEmpty())
-
-    // 6. Session expiration & re-auth marking
     handler.dispatchIncomingJson(
       JSONObject()
         .put("type", "SESSION_EXPIRED")
@@ -178,11 +89,19 @@ class GeckoExtensionMessageHandlerTest {
     )
     assertEquals("expired", expiredReason)
 
-    repository.markSessionExpiredRequiresReauth("expired")
-    assertFalse(repository.state.value.sessionCaptured)
-    assertTrue(repository.state.value.isReauthPromptVisible)
-    assertEquals(SessionExpiryStatus.EXPIRED_REAUTH_REQUIRED, repository.state.value.sessionExpiryStatus)
-    assertNull(repository.currentSessionValue())
-    assertEquals(0, deletedCount)
+    // Ensure legacy OAuth capture / UA messages are safely ignored without error
+    var legacyError = false
+    try {
+      handler.dispatchIncomingJson(
+        JSONObject()
+          .put("type", "OAUTH_TOKEN_CAPTURED")
+          .put("tokenPayload", "ignored"),
+      )
+      handler.dispatchIncomingJson(JSONObject().put("type", "USER_AGENT_UPDATED"))
+    } catch (_: Throwable) {
+      legacyError = true
+    }
+    assertTrue(!legacyError)
+    assertNull(null)
   }
 }

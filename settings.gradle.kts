@@ -23,6 +23,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "BTUCM Auth PoC"
+rootProject.name = "BTUCM"
 
 include(":app")

@@ -1,6 +1,6 @@
 {
-  "name": "BTUCM Auth PoC",
-  "description": "Experimental native Android proof of concept testing BTU Classroom Google OAuth authentication with Mozilla GeckoView, a bundled WebExtension, and OkHttp.",
+  "name": "BTUCM",
+  "description": "Unofficial offline-first native Android student client for BTU Classroom powered by on-demand GeckoView authentication, OkHttp, Jsoup, Room, and Jetpack Compose.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,6 +1,6 @@
 package com.example
 
-import com.example.data.UrlSanitizer
+import com.example.core.auth.UrlSanitizer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull

@@ -1,29 +1,26 @@
-# BTUCM Auth PoC
+# BTUCM (BTU Classroom Mobile — 0.1 Alpha)
 
-Experimental single-APK Android proof of concept testing whether Mozilla **GeckoView** + a bundled **WebExtension** can complete Google OAuth authentication against **BTU Classroom** (`https://classroom.btu.edu.ge/`) and hand off the resulting `argus_session` cookie for independent native **OkHttp** verification.
+Unofficial, offline-first native Android client for Business and Technology University's **BTU Classroom** portal (`https://classroom.btu.edu.ge/`), built with **Kotlin**, **Jetpack Compose (Material 3)**, **Mozilla GeckoView**, **OkHttp**, **Jsoup**, **Room**, and **DataStore**.
 
-## Architecture
+## Architecture (`com.example`)
 
-- **Compose UI (`MainActivity`, `AuthDiagnosticsScreen`, `GeckoBrowserModal`)**
-  - Displays live diagnostic telemetry, control buttons (**Start Login**, **Verify Session**, **Reset Session**, **Check Expiry**, and **Logout from BTU** with confirmation), a **WebExtension User-Agent Switcher**, a **Cookie Inspector & Management** panel, a session-expiration re-authentication dialog, and a timestamped diagnostic event log.
-  - Opens the embedded **GeckoView** session in a full-screen modal during login and keeps it open for inspection if Google rejects the browser (`disallowed_useragent`) or verification fails.
-- **GeckoView & Bidirectional Native Messaging (`GeckoAuthManager`, `GeckoExtensionMessageHandler`)**
-  - Initializes a singleton `GeckoRuntime` with JavaScript enabled, installs the bundled WebExtension via `WebExtensionController.ensureBuiltIn`, and attaches `GeckoExtensionMessageHandler` (`WebExtension.MessageDelegate` + `WebExtension.PortDelegate`) before navigating to `https://classroom.btu.edu.ge/ge/login/index`.
-  - Tracks BTU login loading, Google OAuth navigation, `disallowed_useragent` rejection, `/ge/login/oauth/` callback, OAuth token/callback capture, and `/ge/student/` portal reachability.
-  - Releases the `GeckoSession` once native OkHttp verification succeeds.
-- **Bundled WebExtension (`app/src/main/assets/btucm_ext/`)**
-  - Observes `argus_session` cookie creation, updates, and expiration (`cookies.onChanged` + periodic `expirationDate` checks) strictly for `classroom.btu.edu.ge` (Google cookies are never read).
-  - Supports dynamic `User-Agent` header switching (`DEFAULT`, `FIREFOX_MOBILE`, `CHROME_MOBILE`, `FIREFOX_DESKTOP`, `CUSTOM`) via `webRequest.onBeforeSendHeaders` controlled by native Kotlin messages to test Google OAuth `disallowed_useragent` behavior.
-  - Provides domain cookie listing, explicit domain cookie deletion, and redacted diagnostic logging of all observed `classroom.btu.edu.ge` cookies.
-- **In-Memory Repository & OkHttp Verifier (`BtuSessionRepository`, `BtuSessionVerifier`)**
-  - Keeps `argus_session`, last known valid session details, and OAuth token/code payloads strictly in memory (never persisted, backed up, or logged).
-  - Attempts automatic session verification/refresh using the last known valid session details if `argus_session` expires, and prompts the user to re-authenticate when refresh fails.
-  - Performs an independent `GET https://classroom.btu.edu.ge/ge/student/me/courses` with `Cookie: argus_session=<SESSION>`, TLS verification enabled, redirects disabled, and no browser impersonation headers, verifying `AUTHENTICATED` strictly on HTTP 200 containing `"კურსის დასახელება"` and course-detail links.
+- **Authentication & Security (`core/auth`, `core/security`, `assets/btucm_ext/`)**
+  - **On-Demand GeckoView (`GeckoAuthManager`, `GeckoExtensionMessageHandler`)**: Opens a full-screen GeckoView session only during interactive sign-in, captures `argus_session` from the hardened bundled WebExtension (`cookies`, `webNavigation`, `nativeMessaging`, `geckoViewAddons` scoped strictly to `https://classroom.btu.edu.ge/*`), independently verifies authentication via `BtuHttpClient`, and releases the browser session immediately.
+  - **Session Persistence (`SessionManager`, `AndroidKeystoreSessionCipher`)**: Supports **Session-only (in-memory)** and **Remember Login (Android Keystore AES-256-GCM encrypted in DataStore)** modes. Automatically clears invalidated credentials and distinguishes **Sign Out** (calling `/ge/login/logout` + wiping local cache/browser state) from **Clear Local Data** (local wipe without remote logout).
+  - **External Browser Contingency**: Surfaces an external-browser fallback if Google OAuth ever rejects the embedded browser (`disallowed_useragent`).
+- **Networking & HTML Contracts (`core/network`, `core/parsing`)**
+  - **Centralized `BtuHttpClient`**: Single OkHttp client enforcing approved `classroom.btu.edu.ge` HTTPS origins, disabled redirects, bounded body reads, timeouts, and redacted diagnostics.
+  - **`SelectedCoursesParser` & `CourseDetailParser`**: Semantic Jsoup parsers extracting course codes, titles, credits, nullable scores (`null` for ungraded courses, never `0`), semester groupings, grade components, and safe BTU resource links, paired with `PageCompatibilityRegistry`.
+- **Offline-First Storage (`core/database`, `core/preferences`)**
+  - **Room Database (`BtuDatabase`, `CourseRepository`)**: Caches `StudentEntity`, `SemesterEntity`, `CourseEntity`, `EnrollmentEntity`, `GradeEntity`, and `SyncMetadataEntity` transactionally with reactive `Flow` streams and explicit freshness banners.
+  - **Localization (`LocaleHelper`)**: Complete English (`values/strings.xml`) and Georgian (`values-ka/strings.xml`) resources with instant in-app switching.
+- **UI & Navigation (`app`, `design`, `feature`)**
+  - Adaptive Material 3 shell (`NavigationBar` on phones, `NavigationRail` on larger screens) with four destinations: **Home**, **Courses** (+ **Course Details**), **Schedule** (Phase 3 placeholder), and **More** (+ **Settings** and `BuildConfig.DEBUG`-gated **Developer Diagnostics**).
 
 ## Build & Run
 
-1. Open the project in Android Studio (or build from CLI with Gradle).
-2. Ensure internet access is enabled so Gradle can resolve `org.mozilla.geckoview:geckoview` from `https://maven.mozilla.org/maven2/`.
+1. Open the project in Android Studio or build via CLI with Gradle.
+2. Ensure internet access is enabled to resolve dependencies including `org.mozilla.geckoview:geckoview` from `https://maven.mozilla.org/maven2/`.
 3. Build the debug APK:
    ```bash
    gradle :app:assembleDebug
@@ -31,20 +28,14 @@ Experimental single-APK Android proof of concept testing whether Mozilla **Gecko
 
 ## Tests
 
-Run the local JVM unit and Robolectric tests:
+Run all local JVM unit and Robolectric tests:
 
 ```bash
 gradle :app:testDebugUnitTest
 ```
 
-## GitHub Actions APK Build
+## Security & Privacy Notes
 
-The `Build Android APK` workflow builds and uploads a debug APK signed with the
-standard Android debug keystore when changes are pushed to `main` or `master`, or
-when manually dispatched. No repository signing secrets are required.
-
-## Security Notes
-
-- Session values, OAuth authorization codes, Google credentials, student PII, and raw HTML bodies are never logged or shown in the UI.
-- Android Auto Backup and cloud extraction are disabled (`android:allowBackup="false"` and exclusion rules in `backup_rules.xml` / `data_extraction_rules.xml`).
-- No TLS bypass or OAuth parameter tampering is performed; `User-Agent` switching is off (`DEFAULT`) unless explicitly selected for experimental testing.
+- No OAuth authorization codes, Google cookies, release User-Agent spoofing, or third-party analytics exist in production code.
+- Session values and student data are never written to Logcat or diagnostics, and Android cloud backups/device transfers are disabled (`android:allowBackup="false"`).
+- `BTUCM` is unofficial and unaffiliated with Business and Technology University (BTU).
