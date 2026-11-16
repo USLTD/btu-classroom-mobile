@@ -37,20 +37,9 @@ gradle :app:testDebugUnitTest
 
 ## GitHub Actions APK Build
 
-The `Build Android APK` workflow builds and uploads a signed release APK when changes
-are pushed to `main` or `master`, or when manually dispatched. Configure these
-repository secrets before running it:
-
-- `ANDROID_KEYSTORE_BASE64`: base64-encoded `my-upload-key.jks` containing the
-  `upload` alias.
-- `ANDROID_KEYSTORE_PASSWORD`: keystore password.
-- `ANDROID_KEY_PASSWORD`: password for the `upload` key.
-
-Create the encoded keystore value locally without committing the keystore:
-
-```bash
-base64 -w 0 my-upload-key.jks
-```
+The `Build Android APK` workflow builds and uploads a debug APK signed with the
+standard Android debug keystore when changes are pushed to `main` or `master`, or
+when manually dispatched. No repository signing secrets are required.
 
 ## Security Notes
 
