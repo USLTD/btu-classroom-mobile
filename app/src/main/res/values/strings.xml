@@ -1,0 +1,39 @@
+<resources>
+    <string name="app_name">BTUCM Auth PoC</string>
+    <string name="subtitle_poc_scope">GeckoView + WebExtension + OkHttp Experimental Bridge</string>
+    <string name="target_host_label">Target: classroom.btu.edu.ge</string>
+
+    <string name="action_start_login">Start Login</string>
+    <string name="action_verify_session">Verify Session</string>
+    <string name="action_reset_session">Reset Session</string>
+    <string name="action_logout_btu">Logout from BTU</string>
+    <string name="action_close_browser">Close Browser</string>
+    <string name="action_open_browser">Inspect Browser</string>
+    <string name="action_clear_log">Clear Log</string>
+
+    <string name="section_telemetry">Authentication Telemetry</string>
+    <string name="section_controls">Session Controls</string>
+    <string name="section_event_log">Diagnostic Event Log</string>
+
+    <string name="label_geckoview_status">GeckoView initialization</string>
+    <string name="label_extension_status">Extension installation</string>
+    <string name="label_anon_session_detected">Anonymous session detected</string>
+    <string name="label_google_login_status">Google login status</string>
+    <string name="label_btu_callback_detected">BTU callback detected</string>
+    <string name="label_session_captured">Session captured</string>
+    <string name="label_native_verification_status">Native verification status</string>
+    <string name="label_last_http_status">Last HTTP status code</string>
+    <string name="label_error_message">Error message</string>
+
+    <string name="value_yes">Yes</string>
+    <string name="value_no">No</string>
+    <string name="value_none">None</string>
+
+    <string name="empty_log_message">No diagnostic events yet. Tap Start Login to initialize GeckoView and begin testing BTU Classroom authentication.</string>
+
+    <string name="browser_modal_title">BTU Classroom Auth Session</string>
+    <string name="logout_dialog_title">Logout from BTU Classroom?</string>
+    <string name="logout_dialog_message">This sends GET /ge/login/logout with your current session cookie to expire the server-side BTU session, then clears local state.</string>
+    <string name="logout_dialog_confirm">Logout</string>
+    <string name="logout_dialog_cancel">Cancel</string>
+</resources>
