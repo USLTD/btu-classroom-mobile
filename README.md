@@ -5,18 +5,20 @@ Experimental single-APK Android proof of concept testing whether Mozilla **Gecko
 ## Architecture
 
 - **Compose UI (`MainActivity`, `AuthDiagnosticsScreen`, `GeckoBrowserModal`)**
-  - Displays live diagnostic telemetry, control buttons (**Start Login**, **Verify Session**, **Reset Session**, and **Logout from BTU** with confirmation), and a timestamped diagnostic event log.
+  - Displays live diagnostic telemetry, control buttons (**Start Login**, **Verify Session**, **Reset Session**, **Check Expiry**, and **Logout from BTU** with confirmation), a **WebExtension User-Agent Switcher**, a **Cookie Inspector & Management** panel, a session-expiration re-authentication dialog, and a timestamped diagnostic event log.
   - Opens the embedded **GeckoView** session in a full-screen modal during login and keeps it open for inspection if Google rejects the browser (`disallowed_useragent`) or verification fails.
-- **GeckoView & Native Messaging (`GeckoAuthManager`)**
-  - Initializes a singleton `GeckoRuntime` with JavaScript enabled, installs the bundled WebExtension via `WebExtensionController.ensureBuiltIn`, and attaches `WebExtension.MessageDelegate` before navigating to `https://classroom.btu.edu.ge/ge/login/index`.
-  - Tracks BTU login loading, Google OAuth navigation, `disallowed_useragent` rejection, `/ge/login/oauth/` callback, and `/ge/student/` portal reachability without altering OAuth parameters or spoofing user agents.
+- **GeckoView & Bidirectional Native Messaging (`GeckoAuthManager`, `GeckoExtensionMessageHandler`)**
+  - Initializes a singleton `GeckoRuntime` with JavaScript enabled, installs the bundled WebExtension via `WebExtensionController.ensureBuiltIn`, and attaches `GeckoExtensionMessageHandler` (`WebExtension.MessageDelegate` + `WebExtension.PortDelegate`) before navigating to `https://classroom.btu.edu.ge/ge/login/index`.
+  - Tracks BTU login loading, Google OAuth navigation, `disallowed_useragent` rejection, `/ge/login/oauth/` callback, OAuth token/callback capture, and `/ge/student/` portal reachability.
+  - Releases the `GeckoSession` once native OkHttp verification succeeds.
 - **Bundled WebExtension (`app/src/main/assets/btucm_ext/`)**
-  - Scoped strictly to `https://classroom.btu.edu.ge/*` with `cookies`, `webNavigation`, `nativeMessaging`, and `geckoViewAddons`.
-  - Never inspects Google domains or Google cookies. Observes `argus_session` cookie creation and relays `SESSION_DETECTED` / `SESSION_READY` privately over native messaging.
+  - Observes `argus_session` cookie creation, updates, and expiration (`cookies.onChanged` + periodic `expirationDate` checks) strictly for `classroom.btu.edu.ge` (Google cookies are never read).
+  - Supports dynamic `User-Agent` header switching (`DEFAULT`, `FIREFOX_MOBILE`, `CHROME_MOBILE`, `FIREFOX_DESKTOP`, `CUSTOM`) via `webRequest.onBeforeSendHeaders` controlled by native Kotlin messages to test Google OAuth `disallowed_useragent` behavior.
+  - Provides domain cookie listing, explicit domain cookie deletion, and redacted diagnostic logging of all observed `classroom.btu.edu.ge` cookies.
 - **In-Memory Repository & OkHttp Verifier (`BtuSessionRepository`, `BtuSessionVerifier`)**
-  - Keeps `argus_session` strictly in memory (never persisted, backed up, or logged).
-  - Performs an independent `GET https://classroom.btu.edu.ge/ge/student/me/courses` with `Cookie: argus_session=<SESSION>`, TLS verification enabled, redirects disabled, and no browser impersonation headers.
-  - Verifies `AUTHENTICATED` strictly on HTTP 200 containing the Georgian course-table heading (`კურსის დასახელება`) and course-detail links. Releases the `GeckoSession` upon verified success.
+  - Keeps `argus_session`, last known valid session details, and OAuth token/code payloads strictly in memory (never persisted, backed up, or logged).
+  - Attempts automatic session verification/refresh using the last known valid session details if `argus_session` expires, and prompts the user to re-authenticate when refresh fails.
+  - Performs an independent `GET https://classroom.btu.edu.ge/ge/student/me/courses` with `Cookie: argus_session=<SESSION>`, TLS verification enabled, redirects disabled, and no browser impersonation headers, verifying `AUTHENTICATED` strictly on HTTP 200 containing `"კურსის დასახელება"` and course-detail links.
 
 ## Build & Run
 
@@ -29,7 +31,7 @@ Experimental single-APK Android proof of concept testing whether Mozilla **Gecko
 
 ## Tests
 
-Run the local JVM unit and Robolectric tests (including `MockWebServer` verification for `AUTHENTICATED`, `UNAUTHENTICATED`, `CLOUDFLARE_BLOCKED`, `NETWORK_ERROR`, and `UNEXPECTED_RESPONSE` outcomes):
+Run the local JVM unit and Robolectric tests:
 
 ```bash
 gradle :app:testDebugUnitTest
@@ -45,4 +47,4 @@ when manually dispatched. No repository signing secrets are required.
 
 - Session values, OAuth authorization codes, Google credentials, student PII, and raw HTML bodies are never logged or shown in the UI.
 - Android Auto Backup and cloud extraction are disabled (`android:allowBackup="false"` and exclusion rules in `backup_rules.xml` / `data_extraction_rules.xml`).
-- No User-Agent spoofing, TLS bypass, or OAuth request tampering is performed.
+- No TLS bypass or OAuth parameter tampering is performed; `User-Agent` switching is off (`DEFAULT`) unless explicitly selected for experimental testing.

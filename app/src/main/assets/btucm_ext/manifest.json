@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "BTUCM Auth Cookie Bridge",
-  "version": "1.0.0",
-  "description": "Observes BTU Classroom argus_session cookies and transfers session state to native Kotlin via GeckoView native messaging.",
+  "version": "1.1.0",
+  "description": "Observes BTU Classroom argus_session cookies, manages domain cookies, supports dynamic User-Agent switching, and relays OAuth/session events via GeckoView native messaging.",
   "browser_specific_settings": {
     "gecko": {
       "id": "btucm-auth-poc@research.local",
@@ -12,9 +12,12 @@
   "permissions": [
     "cookies",
     "webNavigation",
+    "webRequest",
+    "webRequestBlocking",
     "nativeMessaging",
     "geckoViewAddons",
-    "https://classroom.btu.edu.ge/*"
+    "https://classroom.btu.edu.ge/*",
+    "https://accounts.google.com/*"
   ],
   "background": {
     "scripts": ["background.js"]

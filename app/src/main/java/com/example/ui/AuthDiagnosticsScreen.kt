@@ -29,10 +29,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cookie
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
@@ -42,11 +47,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,11 +71,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.model.AuthDiagnosticState
+import com.example.model.CookieMetadata
 import com.example.model.DiagnosticLogEntry
 import com.example.model.ExtensionInstallStatus
 import com.example.model.GeckoInitStatus
 import com.example.model.GoogleLoginStatus
 import com.example.model.LogLevel
+import com.example.model.SessionExpiryStatus
+import com.example.model.UserAgentPreset
 import com.example.model.VerificationStatus
 import com.example.ui.theme.ConsoleBorder
 import com.example.ui.theme.ConsoleSurface
@@ -80,6 +90,9 @@ import com.example.ui.theme.StatusSuccess
 import com.example.ui.theme.StatusSuccessBg
 import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.StatusWarningBg
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import org.mozilla.geckoview.GeckoSession
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -90,9 +103,19 @@ fun AuthDiagnosticsScreen(
   onStartLogin: () -> Unit,
   onVerifySession: () -> Unit,
   onResetSession: () -> Unit,
+  onCheckExpiration: () -> Unit,
   onRequestRemoteLogout: () -> Unit,
   onDismissLogoutDialog: () -> Unit,
   onConfirmRemoteLogout: () -> Unit,
+  onDismissReauthPrompt: () -> Unit,
+  onReauthenticateNow: () -> Unit,
+  onSelectUserAgentPreset: (UserAgentPreset) -> Unit,
+  onCustomUserAgentChanged: (String) -> Unit,
+  onApplyUserAgent: () -> Unit,
+  onCookieDomainChanged: (String) -> Unit,
+  onListDomainCookies: () -> Unit,
+  onDeleteDomainCookies: () -> Unit,
+  onLogBtuCookiesDebug: () -> Unit,
   onOpenBrowserModal: () -> Unit,
   onCloseBrowserModal: () -> Unit,
   onBrowserBackPressed: () -> Unit,
@@ -129,8 +152,24 @@ fun AuthDiagnosticsScreen(
           onStartLogin = onStartLogin,
           onVerifySession = onVerifySession,
           onResetSession = onResetSession,
+          onCheckExpiration = onCheckExpiration,
           onRequestRemoteLogout = onRequestRemoteLogout,
           onOpenBrowserModal = onOpenBrowserModal,
+        )
+
+        UserAgentSwitcherCard(
+          state = state,
+          onSelectPreset = onSelectUserAgentPreset,
+          onCustomInputChanged = onCustomUserAgentChanged,
+          onApplyUserAgent = onApplyUserAgent,
+        )
+
+        CookieManagementCard(
+          state = state,
+          onDomainChanged = onCookieDomainChanged,
+          onListCookies = onListDomainCookies,
+          onDeleteCookies = onDeleteDomainCookies,
+          onLogBtuCookies = onLogBtuCookiesDebug,
         )
 
         DiagnosticLogCard(
@@ -170,6 +209,31 @@ fun AuthDiagnosticsScreen(
           modifier = Modifier.testTag("logout_cancel_button"),
         ) {
           Text(stringResource(R.string.logout_dialog_cancel))
+        }
+      },
+    )
+  }
+
+  if (state.isReauthPromptVisible) {
+    AlertDialog(
+      onDismissRequest = onDismissReauthPrompt,
+      modifier = Modifier.testTag("reauth_dialog"),
+      title = { Text(stringResource(R.string.reauth_dialog_title)) },
+      text = { Text(stringResource(R.string.reauth_dialog_message)) },
+      confirmButton = {
+        Button(
+          onClick = onReauthenticateNow,
+          modifier = Modifier.testTag("reauth_confirm_button"),
+        ) {
+          Text(stringResource(R.string.reauth_dialog_confirm))
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = onDismissReauthPrompt,
+          modifier = Modifier.testTag("reauth_dismiss_button"),
+        ) {
+          Text(stringResource(R.string.reauth_dialog_dismiss))
         }
       },
     )
@@ -360,6 +424,11 @@ private fun TelemetryStatusCard(state: AuthDiagnosticState) {
         },
       )
       StatusRow(
+        label = stringResource(R.string.label_active_user_agent),
+        value = state.appliedUserAgentLabel,
+        tone = if (state.appliedUserAgentLabel == UserAgentPreset.DEFAULT.label) RowTone.NEUTRAL else RowTone.WARNING,
+      )
+      StatusRow(
         label = stringResource(R.string.label_anon_session_detected),
         value = if (state.anonymousSessionDetected) yesLabel else noLabel,
         tone = if (state.anonymousSessionDetected) RowTone.SUCCESS else RowTone.NEUTRAL,
@@ -384,9 +453,24 @@ private fun TelemetryStatusCard(state: AuthDiagnosticState) {
         tone = if (state.btuCallbackDetected) RowTone.SUCCESS else RowTone.NEUTRAL,
       )
       StatusRow(
+        label = stringResource(R.string.label_oauth_token_captured),
+        value = if (state.oauthTokenCaptured) yesLabel else noLabel,
+        tone = if (state.oauthTokenCaptured) RowTone.SUCCESS else RowTone.NEUTRAL,
+      )
+      StatusRow(
         label = stringResource(R.string.label_session_captured),
         value = if (state.sessionCaptured) yesLabel else noLabel,
         tone = if (state.sessionCaptured) RowTone.SUCCESS else RowTone.NEUTRAL,
+      )
+      StatusRow(
+        label = stringResource(R.string.label_session_expiry_status),
+        value = state.sessionExpiryStatus.label,
+        tone = when (state.sessionExpiryStatus) {
+          SessionExpiryStatus.ACTIVE -> RowTone.SUCCESS
+          SessionExpiryStatus.REFRESHING -> RowTone.WARNING
+          SessionExpiryStatus.EXPIRED_REAUTH_REQUIRED -> RowTone.ERROR
+          SessionExpiryStatus.NONE -> RowTone.NEUTRAL
+        },
       )
       StatusRow(
         label = stringResource(R.string.label_native_verification_status),
@@ -470,6 +554,7 @@ private fun ControlsCard(
   onStartLogin: () -> Unit,
   onVerifySession: () -> Unit,
   onResetSession: () -> Unit,
+  onCheckExpiration: () -> Unit,
   onRequestRemoteLogout: () -> Unit,
   onOpenBrowserModal: () -> Unit,
 ) {
@@ -558,6 +643,22 @@ private fun ControlsCard(
         }
 
         OutlinedButton(
+          onClick = onCheckExpiration,
+          enabled = !state.isBusy,
+          modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .testTag("check_expiry_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Filled.Refresh,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(stringResource(R.string.action_check_expiry))
+        }
+
+        OutlinedButton(
           onClick = onRequestRemoteLogout,
           enabled = !state.isBusy,
           modifier = Modifier
@@ -591,6 +692,247 @@ private fun ControlsCard(
         }
       }
     }
+  }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun UserAgentSwitcherCard(
+  state: AuthDiagnosticState,
+  onSelectPreset: (UserAgentPreset) -> Unit,
+  onCustomInputChanged: (String) -> Unit,
+  onApplyUserAgent: () -> Unit,
+) {
+  OutlinedCard(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+          imageVector = Icons.Filled.Devices,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = stringResource(R.string.section_ua_tools),
+          style = MaterialTheme.typography.titleMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+
+      FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        UserAgentPreset.entries.forEach { preset ->
+          FilterChip(
+            selected = state.selectedUserAgentPreset == preset,
+            onClick = { onSelectPreset(preset) },
+            label = { Text(preset.label, style = MaterialTheme.typography.bodySmall) },
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .testTag("ua_chip_${preset.id.lowercase()}"),
+          )
+        }
+      }
+
+      AnimatedVisibility(visible = state.selectedUserAgentPreset == UserAgentPreset.CUSTOM) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          OutlinedTextField(
+            value = state.customUserAgentInput,
+            onValueChange = onCustomInputChanged,
+            label = { Text(stringResource(R.string.label_custom_ua_input)) },
+            singleLine = true,
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("custom_ua_input"),
+          )
+          FilledTonalButton(
+            onClick = onApplyUserAgent,
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .testTag("apply_ua_button"),
+          ) {
+            Text(stringResource(R.string.action_apply_ua))
+          }
+        }
+      }
+    }
+  }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CookieManagementCard(
+  state: AuthDiagnosticState,
+  onDomainChanged: (String) -> Unit,
+  onListCookies: () -> Unit,
+  onDeleteCookies: () -> Unit,
+  onLogBtuCookies: () -> Unit,
+) {
+  OutlinedCard(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+          imageVector = Icons.Filled.Cookie,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = stringResource(R.string.section_cookie_tools),
+          style = MaterialTheme.typography.titleMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+
+      OutlinedTextField(
+        value = state.cookieDomainInput,
+        onValueChange = onDomainChanged,
+        label = { Text(stringResource(R.string.label_cookie_domain_input)) },
+        singleLine = true,
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("cookie_domain_input"),
+      )
+
+      FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        FilledTonalButton(
+          onClick = onListCookies,
+          modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .testTag("list_cookies_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Filled.Cookie,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(stringResource(R.string.action_list_cookies))
+        }
+
+        OutlinedButton(
+          onClick = onDeleteCookies,
+          modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .testTag("delete_cookies_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Filled.DeleteOutline,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(stringResource(R.string.action_delete_cookies))
+        }
+
+        OutlinedButton(
+          onClick = onLogBtuCookies,
+          modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .testTag("log_btu_cookies_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Filled.BugReport,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(stringResource(R.string.action_log_btu_cookies))
+        }
+      }
+
+      if (state.inspectedCookies.isEmpty()) {
+        Text(
+          text = stringResource(R.string.empty_cookies_message),
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      } else {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+            .padding(10.dp)
+            .testTag("inspected_cookies_list"),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          state.inspectedCookies.forEach { cookie ->
+            CookieMetadataRow(cookie = cookie)
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CookieMetadataRow(cookie: CookieMetadata) {
+  val expirySummary = when {
+    cookie.isSessionCookie || cookie.expirationDateEpochSeconds == null -> "Session"
+    cookie.isExpired -> "EXPIRED"
+    else -> {
+      val formatted = SimpleDateFormat("MM-dd HH:mm", Locale.US)
+        .format(Date(cookie.expirationDateEpochSeconds * 1000L))
+      "Exp $formatted"
+    }
+  }
+
+  Column(modifier = Modifier.fillMaxWidth()) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "${cookie.name} (${cookie.domain})",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f),
+      )
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = expirySummary,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (cookie.isExpired) StatusError else StatusSuccess,
+      )
+    }
+    Text(
+      text = "path=${cookie.path} • secure=${cookie.secure} • httpOnly=${cookie.httpOnly} • sameSite=${cookie.sameSite}",
+      style = MaterialTheme.typography.labelSmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }
 

@@ -3,14 +3,18 @@ package com.example.gecko
 import android.content.Context
 import com.example.data.BtuSessionRepository
 import com.example.data.UrlSanitizer
+import com.example.model.CookieMetadata
 import com.example.model.ExtensionInstallStatus
 import com.example.model.GeckoInitStatus
 import com.example.model.GoogleLoginStatus
 import com.example.model.LogLevel
+import com.example.model.UserAgentPreset
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -23,12 +27,13 @@ import org.mozilla.geckoview.WebRequestError
 
 /**
  * Coordinates GeckoRuntime, GeckoSession lifecycle, built-in WebExtension installation,
- * and native messaging for BTU Classroom authentication testing.
+ * bidirectional native messaging, User-Agent switching, and domain cookie management.
  */
 class GeckoAuthManager(
   context: Context,
   private val repository: BtuSessionRepository,
   private val onAuthenticatedSessionReady: (String) -> Unit,
+  private val onSessionExpired: (String) -> Unit,
 ) {
 
   private val appContext = context.applicationContext
@@ -37,73 +42,230 @@ class GeckoAuthManager(
   val activeSession: StateFlow<GeckoSession?> = _activeSession.asStateFlow()
 
   private var installedExtension: WebExtension? = null
-  private var controlPort: WebExtension.Port? = null
   private var lastLoggedPathKey: String? = null
 
-  private val messageDelegate = object : WebExtension.MessageDelegate {
-    override fun onMessage(
-      nativeApp: String,
-      message: Any,
-      sender: WebExtension.MessageSender,
-    ): GeckoResult<Any>? {
-      if (nativeApp != NATIVE_APP_NAME) return null
-      val json = message as? JSONObject ?: return null
-      handleExtensionMessage(json)
-      return GeckoResult.fromValue(JSONObject().put("ack", true))
-    }
+  private val messageHandler = GeckoExtensionMessageHandler(
+    object : GeckoExtensionMessageHandler.Listener {
+      override fun onSessionDetected(sessionValue: String?, expirationDateEpochSeconds: Long?) {
+        repository.onAnonymousSessionDetected(sessionValue, expirationDateEpochSeconds)
+      }
 
-    override fun onConnect(port: WebExtension.Port) {
-      controlPort = port
-      port.setDelegate(object : WebExtension.PortDelegate {
-        override fun onPortMessage(message: Any, port: WebExtension.Port) {
-          val json = message as? JSONObject ?: return
-          handleExtensionMessage(json)
-        }
+      override fun onSessionReady(sessionValue: String, expirationDateEpochSeconds: Long?) {
+        repository.onSessionReady(sessionValue, expirationDateEpochSeconds)
+        onAuthenticatedSessionReady(sessionValue)
+      }
 
-        override fun onDisconnect(port: WebExtension.Port) {
-          if (controlPort === port) {
-            controlPort = null
-          }
+      override fun onSessionCookieMissing() {
+        repository.onSessionCookieMissing()
+      }
+
+      override fun onSessionExpired(reason: String, expirationDateEpochSeconds: Long?) {
+        repository.appendLog("Detected argus_session expiration ($reason)", LogLevel.WARNING)
+        onSessionExpired(reason)
+      }
+
+      override fun onBtuCallbackObserved() {
+        if (!repository.state.value.btuCallbackDetected) {
+          repository.onGoogleLoginStatus(
+            status = GoogleLoginStatus.BTU_CALLBACK_OBSERVED,
+            stageLabel = "BTU OAuth Callback",
+            markCallbackDetected = true,
+          )
+          repository.appendLog("BTU callback observed (WebExtension)", LogLevel.INFO)
         }
-      })
+      }
+
+      override fun onAuthenticatedPageReached() {
+        if (repository.state.value.googleLoginStatus != GoogleLoginStatus.AUTHENTICATED_PAGE_REACHED) {
+          repository.onGoogleLoginStatus(
+            status = GoogleLoginStatus.AUTHENTICATED_PAGE_REACHED,
+            stageLabel = "BTU Student Portal Reached",
+          )
+          repository.appendLog("Authenticated BTU page reached (WebExtension)", LogLevel.SUCCESS)
+        }
+      }
+
+      override fun onOAuthTokenCaptured(
+        hasAuthorizationCode: Boolean,
+        hasAccessToken: Boolean,
+        tokenPayload: String?,
+        oauthError: String?,
+      ) {
+        repository.onOAuthTokenCaptured(
+          hasAuthorizationCode = hasAuthorizationCode,
+          hasAccessToken = hasAccessToken,
+          tokenPayload = tokenPayload,
+          oauthError = oauthError,
+        )
+      }
+
+      override fun onUserAgentUpdated(modeId: String, hasOverride: Boolean) {
+        repository.onUserAgentApplied(modeId, hasOverride)
+      }
+
+      override fun onDomainCookiesListed(
+        domain: String,
+        cookies: List<CookieMetadata>,
+        rejected: Boolean,
+        errorOrReason: String?,
+      ) {
+        if (rejected) {
+          repository.appendLog("Cookie list blocked for $domain: ${errorOrReason ?: "restricted"}", LogLevel.WARNING)
+          return
+        }
+        if (errorOrReason != null) {
+          repository.appendLog("Cookie list error for $domain: $errorOrReason", LogLevel.ERROR)
+          return
+        }
+        repository.onDomainCookiesListed(cookies)
+        repository.appendLog("Listed ${cookies.size} cookie(s) for $domain (values redacted)", LogLevel.INFO)
+      }
+
+      override fun onDomainCookiesDeleted(
+        domain: String,
+        deletedCount: Int,
+        deletedNames: List<String>,
+        rejected: Boolean,
+        errorOrReason: String?,
+      ) {
+        if (rejected) {
+          repository.appendLog("Cookie deletion blocked for $domain: ${errorOrReason ?: "restricted"}", LogLevel.WARNING)
+          return
+        }
+        if (errorOrReason != null) {
+          repository.appendLog("Cookie deletion error for $domain: $errorOrReason", LogLevel.ERROR)
+          return
+        }
+        repository.onDomainCookiesListed(emptyList())
+        val namesSummary = if (deletedNames.isEmpty()) "none" else deletedNames.joinToString(", ")
+        repository.appendLog("Deleted $deletedCount cookie(s) for $domain [$namesSummary]", LogLevel.INFO)
+        if (domain.contains("btu.edu.ge", ignoreCase = true) && "argus_session" in deletedNames) {
+          onSessionExpired("deleted")
+        }
+      }
+
+      override fun onBtuCookiesDebugLogged(
+        domain: String,
+        cookies: List<CookieMetadata>,
+        error: String?,
+      ) {
+        if (error != null) {
+          repository.appendLog("BTU cookie debug failed: $error", LogLevel.ERROR)
+          return
+        }
+        repository.onDomainCookiesListed(cookies)
+        if (cookies.isEmpty()) {
+          repository.appendLog("BTU cookie debug [$domain]: 0 cookies present", LogLevel.INFO)
+          return
+        }
+        repository.appendLog("BTU cookie debug [$domain]: ${cookies.size} cookie(s) observed:", LogLevel.INFO)
+        cookies.forEach { cookie ->
+          val expiryText = formatCookieExpiry(cookie)
+          repository.appendLog(
+            "  • ${cookie.name} | domain=${cookie.domain} | path=${cookie.path} | secure=${cookie.secure} | httpOnly=${cookie.httpOnly} | sameSite=${cookie.sameSite} | $expiryText",
+            if (cookie.isExpired) LogLevel.WARNING else LogLevel.INFO,
+          )
+        }
+      }
+    },
+  )
+
+  fun startLogin() {
+    repository.setBrowserModalVisible(true)
+    lastLoggedPathKey = null
+    ensureRuntimeAndExtension { runtime, ok ->
+      if (!ok || runtime == null) return@ensureRuntimeAndExtension
+      syncUserAgentToExtension()
+      openSessionAndNavigate(runtime)
     }
   }
 
-  fun startLogin() {
-    repository.setGeckoStatus(GeckoInitStatus.INITIALIZING)
+  fun setUserAgent(preset: UserAgentPreset, customUa: String?) {
+    repository.setUserAgentSelection(preset, customUa)
+    val effectiveUa = when (preset) {
+      UserAgentPreset.DEFAULT -> null
+      UserAgentPreset.CUSTOM -> customUa?.trim()?.ifBlank { null }
+      else -> preset.userAgentString
+    }
+    ensureRuntimeAndExtension { _, ok ->
+      if (ok) {
+        messageHandler.setUserAgent(preset.id, effectiveUa)
+      }
+    }
+  }
+
+  fun listCookiesForDomain(domain: String) {
+    val cleanDomain = domain.trim().ifBlank { BTU_HOST }
+    repository.setCookieDomainInput(cleanDomain)
+    ensureRuntimeAndExtension { _, ok ->
+      if (ok) {
+        messageHandler.listDomainCookies(cleanDomain)
+      }
+    }
+  }
+
+  fun deleteCookiesForDomain(domain: String) {
+    val cleanDomain = domain.trim().ifBlank { BTU_HOST }
+    repository.setCookieDomainInput(cleanDomain)
+    ensureRuntimeAndExtension { _, ok ->
+      if (ok) {
+        messageHandler.deleteDomainCookies(cleanDomain)
+      }
+    }
+  }
+
+  fun logBtuCookiesDebug() {
+    ensureRuntimeAndExtension { _, ok ->
+      if (ok) {
+        messageHandler.logBtuCookies()
+      }
+    }
+  }
+
+  fun checkSessionExpiration() {
+    ensureRuntimeAndExtension { _, ok ->
+      if (ok) {
+        messageHandler.checkSessionExpiration()
+      }
+    }
+  }
+
+  fun attemptSilentSessionReload(): Boolean {
+    val session = _activeSession.value ?: return false
+    session.loadUri(BTU_COURSES_URL)
+    messageHandler.queryBtuSession(expectAuthenticated = true)
+    return true
+  }
+
+  private fun ensureRuntimeAndExtension(onReady: (GeckoRuntime?, Boolean) -> Unit) {
+    val existingRuntime = sharedRuntime
+    val existingExt = installedExtension
+    if (existingRuntime != null && existingExt != null) {
+      messageHandler.attachToExtension(existingExt)
+      repository.setGeckoStatus(GeckoInitStatus.READY)
+      repository.setExtensionStatus(ExtensionInstallStatus.INSTALLED)
+      onReady(existingRuntime, true)
+      return
+    }
+
+    if (existingRuntime == null) {
+      repository.setGeckoStatus(GeckoInitStatus.INITIALIZING)
+    }
     repository.setExtensionStatus(ExtensionInstallStatus.INSTALLING)
-    repository.setBrowserModalVisible(true)
-    lastLoggedPathKey = null
 
     val runtime = try {
+      val wasNull = sharedRuntime == null
       getOrCreateRuntime(appContext).also {
         repository.setGeckoStatus(GeckoInitStatus.READY)
-        repository.appendLog("GeckoRuntime initialized", LogLevel.INFO)
+        if (wasNull) {
+          repository.appendLog("GeckoRuntime initialized", LogLevel.INFO)
+        }
       }
     } catch (t: Throwable) {
       val msg = "Failed to initialize GeckoRuntime: ${t.message ?: t.javaClass.simpleName}"
       repository.setGeckoStatus(GeckoInitStatus.FAILED, msg)
       repository.appendLog(msg, LogLevel.ERROR)
-      return
-    }
-
-    ensureExtensionInstalled(runtime) { success ->
-      if (!success) {
-        return@ensureExtensionInstalled
-      }
-      openSessionAndNavigate(runtime)
-    }
-  }
-
-  private fun ensureExtensionInstalled(
-    runtime: GeckoRuntime,
-    onDone: (Boolean) -> Unit,
-  ) {
-    val existing = installedExtension
-    if (existing != null) {
-      existing.setMessageDelegate(messageDelegate, NATIVE_APP_NAME)
-      repository.setExtensionStatus(ExtensionInstallStatus.INSTALLED)
-      onDone(true)
+      onReady(null, false)
       return
     }
 
@@ -115,26 +277,39 @@ class GeckoAuthManager(
             val msg = "WebExtension installation returned null extension."
             repository.setExtensionStatus(ExtensionInstallStatus.FAILED, msg)
             repository.appendLog(msg, LogLevel.ERROR)
-            onDone(false)
+            onReady(runtime, false)
           } else {
+            val wasNew = installedExtension == null
             installedExtension = extension
-            extension.setMessageDelegate(messageDelegate, NATIVE_APP_NAME)
+            messageHandler.attachToExtension(extension)
             repository.setExtensionStatus(ExtensionInstallStatus.INSTALLED)
-            repository.appendLog("WebExtension installed", LogLevel.SUCCESS)
-            onDone(true)
+            if (wasNew) {
+              repository.appendLog("WebExtension installed", LogLevel.SUCCESS)
+            }
+            onReady(runtime, true)
           }
         },
         { throwable ->
           val msg = "WebExtension install failed: ${throwable?.message ?: "unknown error"}"
           repository.setExtensionStatus(ExtensionInstallStatus.FAILED, msg)
           repository.appendLog(msg, LogLevel.ERROR)
-          onDone(false)
+          onReady(runtime, false)
         },
       )
   }
 
+  private fun syncUserAgentToExtension() {
+    val currentState = repository.state.value
+    val preset = currentState.selectedUserAgentPreset
+    val effectiveUa = when (preset) {
+      UserAgentPreset.DEFAULT -> null
+      UserAgentPreset.CUSTOM -> currentState.customUserAgentInput.trim().ifBlank { null }
+      else -> preset.userAgentString
+    }
+    messageHandler.setUserAgent(preset.id, effectiveUa)
+  }
+
   private fun openSessionAndNavigate(runtime: GeckoRuntime) {
-    // Release any stale session before creating a fresh login session
     releaseCurrentSessionInternal(logRelease = false)
 
     val sessionSettings = GeckoSessionSettings.Builder()
@@ -146,7 +321,7 @@ class GeckoAuthManager(
       progressDelegate = createProgressDelegate()
     }
 
-    installedExtension?.setMessageDelegate(messageDelegate, NATIVE_APP_NAME)
+    installedExtension?.let { messageHandler.attachToExtension(it) }
 
     session.open(runtime)
     _activeSession.value = session
@@ -170,7 +345,6 @@ class GeckoAuthManager(
         request: GeckoSession.NavigationDelegate.LoadRequest,
       ): GeckoResult<AllowOrDeny> {
         inspectNavigationUri(request.uri, isCommitted = false)
-        // Always allow original BTU and Google OAuth navigation without altering parameters
         return GeckoResult.fromValue(AllowOrDeny.ALLOW)
       }
 
@@ -214,11 +388,11 @@ class GeckoAuthManager(
         if (success && currentStatus == GoogleLoginStatus.AUTHENTICATED_PAGE_REACHED &&
           !repository.state.value.sessionCaptured
         ) {
-          queryExtensionForSession(expectAuthenticated = true)
+          messageHandler.queryBtuSession(expectAuthenticated = true)
         } else if (success && currentStatus == GoogleLoginStatus.BTU_LOGIN_LOADED &&
           !repository.state.value.anonymousSessionDetected
         ) {
-          queryExtensionForSession(expectAuthenticated = false)
+          messageHandler.queryBtuSession(expectAuthenticated = false)
         }
       }
     }
@@ -233,7 +407,7 @@ class GeckoAuthManager(
       val key = "rejected:$host"
       if (lastLoggedPathKey != key) {
         lastLoggedPathKey = key
-        val rejectionMsg = "Google rejected the embedded GeckoView browser (disallowed_useragent). This authentication approach is incompatible with Google's current OAuth policy."
+        val rejectionMsg = "Google rejected the embedded GeckoView browser (disallowed_useragent). Current User-Agent: ${repository.state.value.appliedUserAgentLabel}."
         repository.onGoogleLoginStatus(
           status = GoogleLoginStatus.REJECTED_DISALLOWED_USERAGENT,
           stageLabel = "Google Rejected (disallowed_useragent)",
@@ -284,7 +458,7 @@ class GeckoAuthManager(
             repository.appendLog("Authenticated BTU page reached", LogLevel.SUCCESS)
           }
           if (isCommitted) {
-            queryExtensionForSession(expectAuthenticated = true)
+            messageHandler.queryBtuSession(expectAuthenticated = true)
           }
         }
         path.startsWith("/ge/login/index") || path == "/" -> {
@@ -329,59 +503,6 @@ class GeckoAuthManager(
     }
   }
 
-  private fun handleExtensionMessage(json: JSONObject) {
-    when (json.optString("type")) {
-      "SESSION_DETECTED" -> {
-        val sessionValue = json.optString("session", "")
-        repository.onAnonymousSessionDetected(sessionValue.ifBlank { null })
-      }
-      "BTU_CALLBACK_OBSERVED" -> {
-        if (!repository.state.value.btuCallbackDetected) {
-          repository.onGoogleLoginStatus(
-            status = GoogleLoginStatus.BTU_CALLBACK_OBSERVED,
-            stageLabel = "BTU OAuth Callback",
-            markCallbackDetected = true,
-          )
-          repository.appendLog("BTU callback observed (WebExtension)", LogLevel.INFO)
-        }
-      }
-      "AUTHENTICATED_PAGE_REACHED" -> {
-        if (repository.state.value.googleLoginStatus != GoogleLoginStatus.AUTHENTICATED_PAGE_REACHED) {
-          repository.onGoogleLoginStatus(
-            status = GoogleLoginStatus.AUTHENTICATED_PAGE_REACHED,
-            stageLabel = "BTU Student Portal Reached",
-          )
-          repository.appendLog("Authenticated BTU page reached (WebExtension)", LogLevel.SUCCESS)
-        }
-      }
-      "SESSION_READY" -> {
-        val sessionValue = json.optString("session", "")
-        if (sessionValue.isBlank()) {
-          repository.onSessionCookieMissing()
-        } else {
-          repository.onSessionReady(sessionValue)
-          onAuthenticatedSessionReady(sessionValue)
-        }
-      }
-      "SESSION_COOKIE_MISSING" -> {
-        repository.onSessionCookieMissing()
-      }
-    }
-  }
-
-  private fun queryExtensionForSession(expectAuthenticated: Boolean) {
-    val port = controlPort ?: return
-    try {
-      port.postMessage(
-        JSONObject()
-          .put("action", "QUERY_BTU_SESSION")
-          .put("expectAuthenticated", expectAuthenticated),
-      )
-    } catch (_: Throwable) {
-      // Non-fatal; passive webNavigation/cookie listeners remain active
-    }
-  }
-
   fun goBackInBrowser(): Boolean {
     val session = _activeSession.value ?: return false
     return if (repository.state.value.browserCanGoBack) {
@@ -402,11 +523,7 @@ class GeckoAuthManager(
     releaseCurrentSessionInternal(logRelease = false)
     repository.setBrowserModalVisible(false)
     lastLoggedPathKey = null
-
-    try {
-      controlPort?.postMessage(JSONObject().put("action", "RESET_STATE"))
-    } catch (_: Throwable) {
-    }
+    messageHandler.resetExtensionState()
 
     val runtime = sharedRuntime
     if (runtime == null) {
@@ -454,12 +571,21 @@ class GeckoAuthManager(
     }
   }
 
+  private fun formatCookieExpiry(cookie: CookieMetadata): String {
+    if (cookie.isSessionCookie || cookie.expirationDateEpochSeconds == null) {
+      return "session-cookie"
+    }
+    val formatted = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+      .format(Date(cookie.expirationDateEpochSeconds * 1000L))
+    return if (cookie.isExpired) "EXPIRED($formatted)" else "expires=$formatted"
+  }
+
   companion object {
     private const val BTU_HOST = "classroom.btu.edu.ge"
     private const val BTU_LOGIN_URL = "https://classroom.btu.edu.ge/ge/login/index"
+    private const val BTU_COURSES_URL = "https://classroom.btu.edu.ge/ge/student/me/courses"
     private const val EXTENSION_LOCATION = "resource://android/assets/btucm_ext/"
     private const val EXTENSION_ID = "btucm-auth-poc@research.local"
-    private const val NATIVE_APP_NAME = "btucm_native"
 
     @Volatile
     private var sharedRuntime: GeckoRuntime? = null

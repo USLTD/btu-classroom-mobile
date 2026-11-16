@@ -7,6 +7,7 @@ import com.example.data.BtuSessionRepository
 import com.example.gecko.GeckoAuthManager
 import com.example.model.AuthDiagnosticState
 import com.example.model.LogLevel
+import com.example.model.UserAgentPreset
 import com.example.model.VerificationStatus
 import com.example.network.BtuSessionVerifier
 import kotlinx.coroutines.flow.StateFlow
@@ -18,11 +19,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
   private val repository = BtuSessionRepository()
   private val verifier = BtuSessionVerifier()
 
-  private val geckoManager = GeckoAuthManager(
+  private val geckoManager: GeckoAuthManager = GeckoAuthManager(
     context = application,
     repository = repository,
     onAuthenticatedSessionReady = {
       verifySession()
+    },
+    onSessionExpired = { reason ->
+      handleSessionExpiration(reason)
     },
   )
 
@@ -31,6 +35,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
   fun startLogin() {
     if (repository.state.value.isBusy) return
+    repository.dismissReauthPrompt()
     repository.setError(null)
     geckoManager.startLogin()
   }
@@ -48,6 +53,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
       repository.appendLog("Verification skipped: no session in memory", LogLevel.WARNING)
       return
     }
+
+    val wasCaptured = repository.state.value.sessionCaptured
 
     viewModelScope.launch {
       repository.setVerifying(true)
@@ -72,11 +79,105 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
       )
 
       if (result.status == VerificationStatus.AUTHENTICATED) {
-        // Release GeckoView login session upon verified success so subsequent checks stay GeckoView-free
         geckoManager.releaseLoginSession()
+      } else if (result.status == VerificationStatus.UNAUTHENTICATED && wasCaptured) {
+        repository.markSessionExpiredRequiresReauth("server returned ${result.httpStatusCode ?: "unauthenticated"}")
       }
-      // On failure, intentionally keep GeckoView modal open if currently displayed for inspection
     }
+  }
+
+  private fun handleSessionExpiration(reason: String) {
+    if (repository.state.value.isBusy) return
+    val candidateSession = repository.lastKnownValidSessionValue()
+    repository.setSessionRefreshing()
+    repository.appendLog("Attempting automatic session refresh using last known valid session details...", LogLevel.INFO)
+
+    viewModelScope.launch {
+      // If a GeckoSession is currently active, ask it to reload the authenticated BTU page as well
+      val reloadedInBrowser = geckoManager.attemptSilentSessionReload()
+      if (reloadedInBrowser) {
+        repository.appendLog("Triggered silent BTU session refresh inside active GeckoView", LogLevel.INFO)
+      }
+
+      if (!candidateSession.isNullOrBlank()) {
+        val result = verifier.verify(candidateSession)
+        result.httpStatusCode?.let { code ->
+          repository.appendLog("Auto-refresh probe HTTP $code", LogLevel.INFO)
+        }
+        if (result.status == VerificationStatus.AUTHENTICATED) {
+          repository.onSessionReady(candidateSession)
+          repository.onVerificationResult(
+            status = VerificationStatus.AUTHENTICATED,
+            httpStatusCode = result.httpStatusCode,
+            errorMessage = null,
+          )
+          repository.appendLog("Automatic session refresh succeeded; session remains valid on BTU", LogLevel.SUCCESS)
+          return@launch
+        }
+      }
+
+      repository.markSessionExpiredRequiresReauth(reason)
+    }
+  }
+
+  fun checkSessionExpiration() {
+    geckoManager.checkSessionExpiration()
+    val exp = repository.state.value.sessionExpiresAtEpochSeconds
+    if (exp != null && exp <= (System.currentTimeMillis() / 1000L)) {
+      handleSessionExpiration("expiration_timestamp_passed")
+    } else if (!repository.currentSessionValue().isNullOrBlank()) {
+      verifySession()
+    } else {
+      repository.appendLog("No active argus_session to check for expiration", LogLevel.INFO)
+    }
+  }
+
+  fun dismissReauthPrompt() {
+    repository.dismissReauthPrompt()
+  }
+
+  fun reauthenticateNow() {
+    repository.dismissReauthPrompt()
+    resetAndStartLogin()
+  }
+
+  private fun resetAndStartLogin() {
+    geckoManager.resetBrowserSession {
+      repository.resetSessionState(keepLogs = true)
+      geckoManager.startLogin()
+    }
+  }
+
+  fun selectUserAgentPreset(preset: UserAgentPreset) {
+    repository.setUserAgentSelection(preset)
+    if (preset != UserAgentPreset.CUSTOM) {
+      geckoManager.setUserAgent(preset, null)
+    }
+  }
+
+  fun updateCustomUserAgentInput(value: String) {
+    repository.setUserAgentSelection(UserAgentPreset.CUSTOM, value)
+  }
+
+  fun applyCurrentUserAgent() {
+    val state = repository.state.value
+    geckoManager.setUserAgent(state.selectedUserAgentPreset, state.customUserAgentInput)
+  }
+
+  fun updateCookieDomainInput(domain: String) {
+    repository.setCookieDomainInput(domain)
+  }
+
+  fun listDomainCookies() {
+    geckoManager.listCookiesForDomain(repository.state.value.cookieDomainInput)
+  }
+
+  fun deleteDomainCookies() {
+    geckoManager.deleteCookiesForDomain(repository.state.value.cookieDomainInput)
+  }
+
+  fun logBtuCookiesDebug() {
+    geckoManager.logBtuCookiesDebug()
   }
 
   fun resetSession() {
