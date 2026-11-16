@@ -122,6 +122,58 @@ class BtuSessionVerifierTest {
   }
 
   @Test
+  fun `verify returns AUTHENTICATED when HTTP 200 includes Cloudflare scripts and courses subpath link`() = runTest {
+    val html = """
+      <html>
+        <head>
+          <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>
+        </head>
+        <body>
+          <table>
+            <thead><tr><th>კურსის დასახელება</th></tr></thead>
+            <tbody>
+              <tr><td><a href="/ge/student/me/courses/98765">Operating Systems</a></td></tr>
+            </tbody>
+          </table>
+        </body>
+      </html>
+    """.trimIndent()
+    server.enqueue(
+      MockResponse()
+        .setResponseCode(200)
+        .addHeader("Server", "cloudflare")
+        .setBody(html),
+    )
+
+    val result = verifier.verify("valid_session_cookie")
+
+    assertEquals(VerificationStatus.AUTHENTICATED, result.status)
+    assertEquals(200, result.httpStatusCode)
+    assertNull(result.errorMessage)
+  }
+
+  @Test
+  fun `verify returns CLOUDFLARE_BLOCKED on HTTP 200 interstitial challenge page`() = runTest {
+    val challengeHtml = """
+      <html>
+        <head><title>Just a moment...</title></head>
+        <body><form id="challenge-form"><script>window._cf_chl_opt={};</script></form></body>
+      </html>
+    """.trimIndent()
+    server.enqueue(
+      MockResponse()
+        .setResponseCode(200)
+        .addHeader("Server", "cloudflare")
+        .setBody(challengeHtml),
+    )
+
+    val result = verifier.verify("test_cookie")
+
+    assertEquals(VerificationStatus.CLOUDFLARE_BLOCKED, result.status)
+    assertEquals(200, result.httpStatusCode)
+  }
+
+  @Test
   fun `verify returns NETWORK_ERROR when server is unreachable`() = runTest {
     server.shutdown()
 

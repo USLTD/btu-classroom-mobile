@@ -107,6 +107,22 @@ class BtuSessionVerifier(
     serverHeader: String?,
     body: String,
   ): VerificationResult {
+    // 1. Always verify authenticated courses page evidence first on HTTP 200 so embedded
+    // Cloudflare scripts (e.g. /cdn-cgi/challenge-platform RUM/Turnstile) never cause false positives.
+    if (statusCode == 200) {
+      val hasGeorgianCoursesHeading = body.contains(AUTHENTICATED_HEADING)
+      val hasCourseDetailLinks = COURSE_LINK_REGEX.containsMatchIn(body)
+      if (hasGeorgianCoursesHeading && hasCourseDetailLinks) {
+        return VerificationResult(
+          status = VerificationStatus.AUTHENTICATED,
+          httpStatusCode = statusCode,
+          errorMessage = null,
+          logSummary = "AUTHENTICATED (courses heading and course links verified)",
+        )
+      }
+    }
+
+    // 2. Check genuine Cloudflare challenge / block responses.
     if (isCloudflareBlocked(statusCode, cfMitigatedHeader, serverHeader, body)) {
       return VerificationResult(
         status = VerificationStatus.CLOUDFLARE_BLOCKED,
@@ -116,6 +132,7 @@ class BtuSessionVerifier(
       )
     }
 
+    // 3. Check unauthenticated redirects (without following them).
     if (statusCode in setOf(301, 302, 303, 307, 308)) {
       val loc = locationHeader.orEmpty().lowercase()
       return if (loc.contains("/ge/login") || loc.contains("accounts.google.com") || loc.contains("login")) {
@@ -145,17 +162,6 @@ class BtuSessionVerifier(
     }
 
     if (statusCode == 200) {
-      val hasGeorgianCoursesHeading = body.contains(AUTHENTICATED_HEADING)
-      val hasCourseDetailLinks = COURSE_LINK_REGEX.containsMatchIn(body)
-      if (hasGeorgianCoursesHeading && hasCourseDetailLinks) {
-        return VerificationResult(
-          status = VerificationStatus.AUTHENTICATED,
-          httpStatusCode = statusCode,
-          errorMessage = null,
-          logSummary = "AUTHENTICATED (courses heading and course links verified)",
-        )
-      }
-
       if (looksLikeLoginPage(body)) {
         return VerificationResult(
           status = VerificationStatus.UNAUTHENTICATED,
@@ -190,18 +196,32 @@ class BtuSessionVerifier(
     if (cfMitigatedHeader?.equals("challenge", ignoreCase = true) == true) {
       return true
     }
+
     val lowerBody = body.lowercase()
-    val hasCfChallengeMarker =
-      lowerBody.contains("cf-browser-verification") ||
-        lowerBody.contains("cf_chl_opt") ||
-        lowerBody.contains("/cdn-cgi/challenge-platform") ||
-        lowerBody.contains("just a moment...") ||
-        lowerBody.contains("attention required! | cloudflare")
-    if (hasCfChallengeMarker) {
-      return true
-    }
     val isCfServer = serverHeader?.contains("cloudflare", ignoreCase = true) == true
-    return isCfServer && statusCode in setOf(403, 429, 503)
+
+    if (statusCode in setOf(403, 429, 503)) {
+      val hasChallengeBody =
+        lowerBody.contains("cf-browser-verification") ||
+          lowerBody.contains("cf_chl_opt") ||
+          lowerBody.contains("/cdn-cgi/challenge-platform") ||
+          lowerBody.contains("just a moment...") ||
+          lowerBody.contains("attention required! | cloudflare")
+      if (isCfServer || hasChallengeBody) {
+        return true
+      }
+    }
+
+    // Only treat HTTP 200 as Cloudflare-blocked when an unambiguous full-page challenge interstitial is returned
+    if (statusCode == 200) {
+      return lowerBody.contains("<title>just a moment...</title>") ||
+        lowerBody.contains("<title>attention required! | cloudflare</title>") ||
+        lowerBody.contains("id=\"cf-challenge-running\"") ||
+        lowerBody.contains("class=\"cf-browser-verification\"") ||
+        (lowerBody.contains("id=\"challenge-form\"") && lowerBody.contains("cf_chl_opt"))
+    }
+
+    return false
   }
 
   private fun looksLikeLoginPage(body: String): Boolean {
@@ -219,7 +239,7 @@ class BtuSessionVerifier(
     private const val AUTHENTICATED_HEADING = "კურსის დასახელება"
 
     private val COURSE_LINK_REGEX = Regex(
-      """href\s*=\s*["'][^"']*(?:/ge/student/(?!login|me/courses\b)|/ge/course/|/course/)[^"']*["']""",
+      """href\s*=\s*["'][^"']*(?:/ge/student/me/courses(?:/|\?)|/ge/student/(?!login\b|me/courses(?:["'#]|$))|/ge/courses?/|/course/)[^"']*["']""",
       RegexOption.IGNORE_CASE,
     )
 
